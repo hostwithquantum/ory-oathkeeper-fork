@@ -163,6 +163,10 @@ func forwardRequestToSessionStore(r *http.Request, checkSessionURL string, prese
 		if k == "Accept-Encoding" {
 			continue
 		}
+		// remove websocket-releated headers to not confuse reverse proxies
+		if k == "Upgrade" || k == "Connection" || k == "Sec-Websocket-Key" || k == "Sec-Websocket-Version" {
+			continue
+		}
 		req.Header[k] = v
 	}
 
