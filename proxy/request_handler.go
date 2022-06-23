@@ -218,6 +218,12 @@ func (d *RequestHandler) HandleRequest(r *http.Request, rl *rule.Rule) (session 
 			switch errors.Cause(err).Error() {
 			case authn.ErrAuthenticatorNotResponsible.Error():
 				// The authentication handler is not responsible for handling this request, skip to the next handler
+				d.r.Logger().WithError(err).
+					WithFields(fields).
+					WithField("granted", false).
+					WithField("authentication_handler", a.Handler).
+					WithField("reason_id", "authentication_handler_not_responsible").
+					Debug("The authentication handler is not responsible - trying next")
 				break
 			// case ErrAuthenticatorBypassed.Error():
 			// The authentication handler says that no further authentication/authorization is required, and the request should
