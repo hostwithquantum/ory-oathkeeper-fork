@@ -12,6 +12,8 @@ import (
 	"github.com/ory/oathkeeper/driver/configuration"
 	"github.com/ory/oathkeeper/helper"
 	"github.com/ory/oathkeeper/pipeline"
+
+	"github.com/ory/x/logrusx"
 )
 
 func init() {
@@ -36,12 +38,14 @@ type AuthenticatorBearerTokenConfiguration struct {
 }
 
 type AuthenticatorBearerToken struct {
-	c configuration.Provider
+	c      configuration.Provider
+	logger *logrusx.Logger
 }
 
-func NewAuthenticatorBearerToken(c configuration.Provider) *AuthenticatorBearerToken {
+func NewAuthenticatorBearerToken(c configuration.Provider, logger *logrusx.Logger) *AuthenticatorBearerToken {
 	return &AuthenticatorBearerToken{
-		c: c,
+		c:      c,
+		logger: logger,
 	}
 }
 
@@ -86,7 +90,7 @@ func (a *AuthenticatorBearerToken) Authenticate(r *http.Request, session *Authen
 		return errors.WithStack(ErrAuthenticatorNotResponsible)
 	}
 
-	body, err := forwardRequestToSessionStore(r, cf.CheckSessionURL, cf.PreserveQuery, cf.PreservePath, cf.PreserveHost, cf.SetHeaders, cf.ForceMethod)
+	body, err := forwardRequestToSessionStore(r, cf.CheckSessionURL, cf.PreserveQuery, cf.PreservePath, cf.PreserveHost, cf.SetHeaders, cf.ForceMethod, a.logger)
 	if err != nil {
 		return err
 	}
@@ -105,6 +109,10 @@ func (a *AuthenticatorBearerToken) Authenticate(r *http.Request, session *Authen
 
 	if err = json.Unmarshal(extraRaw, &extra); err != nil {
 		return helper.ErrForbidden.WithReasonf("The configured extra_from GJSON path returned an error on JSON output: %s", err.Error()).WithDebugf("GJSON path: %s\nBody: %s\nResult: %s", cf.ExtraFrom, body, extraRaw).WithTrace(err)
+	}
+
+	if len(subject) == 0 {
+		return errors.WithStack(helper.ErrForbidden.WithReasonf("Subject field from remote endpoint is empty."))
 	}
 
 	session.Subject = subject
