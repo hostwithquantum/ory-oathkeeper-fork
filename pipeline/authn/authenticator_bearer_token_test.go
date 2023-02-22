@@ -1,10 +1,13 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package authn_test
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -25,6 +28,7 @@ import (
 )
 
 func TestAuthenticatorBearerToken(t *testing.T) {
+	t.Parallel()
 	conf := internal.NewConfigurationWithDefaults()
 	reg := internal.NewRegistry(conf)
 
@@ -200,6 +204,24 @@ func TestAuthenticatorBearerToken(t *testing.T) {
 				},
 			},
 			{
+				d: "should NOT pass Accept-Encoding",
+				r: &http.Request{Host: "some-host", Header: http.Header{"Authorization": {"bearer zyx"}, "Accept-Encoding": {"gzip"}}, URL: &url.URL{Path: "/users/123", RawQuery: "query=string"}, Method: "PUT"},
+				router: func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, "PUT")
+					assert.Equal(t, "some-host", r.Header.Get("X-Forwarded-Host"))
+					assert.Equal(t, "bar", r.Header.Get("X-Foo"))
+					assert.Equal(t, r.Header.Get("Authorization"), "bearer zyx")
+					assert.Equal(t, "", r.Header.Get("Accept-Encoding"))
+					w.WriteHeader(200)
+					w.Write([]byte(`{"sub": "123"}`))
+				},
+				config:    []byte(`{"preserve_host": true, "additional_headers": {"X-Foo": "bar","X-Forwarded-For": "not-some-host"}}`),
+				expectErr: false,
+				expectSess: &AuthenticationSession{
+					Subject: "123",
+				},
+			},
+			{
 				d: "does not pass request body through to auth server",
 				r: &http.Request{
 					Header: http.Header{
@@ -208,10 +230,10 @@ func TestAuthenticatorBearerToken(t *testing.T) {
 					},
 					URL:    &url.URL{Path: "/users/123", RawQuery: "query=string"},
 					Method: "PUT",
-					Body:   ioutil.NopCloser(bytes.NewBufferString("body")),
+					Body:   io.NopCloser(bytes.NewBufferString("body")),
 				},
 				router: func(w http.ResponseWriter, r *http.Request) {
-					requestBody, _ := ioutil.ReadAll(r.Body)
+					requestBody, _ := io.ReadAll(r.Body)
 					assert.Equal(t, r.ContentLength, int64(0))
 					assert.Equal(t, requestBody, []byte{})
 					w.WriteHeader(200)
@@ -253,6 +275,19 @@ func TestAuthenticatorBearerToken(t *testing.T) {
 					Subject: "123",
 					Extra:   map[string]interface{}{"session": map[string]interface{}{"foo": "bar"}, "identity": map[string]interface{}{"id": "123"}},
 				},
+			},
+			{
+				d: "it should error when the subject is empty",
+				r: &http.Request{Header: http.Header{"Authorization": {"bearer token"}}, URL: &url.URL{Path: ""}},
+				setup: func(t *testing.T, m *httprouter.Router) {
+					m.GET("/", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+						w.WriteHeader(200)
+						w.Write([]byte(`{"identity": {"id": ""}, "session": {"foo": "bar"}}`))
+					})
+				},
+				config:     []byte(`{"subject_from": "identity.id", "extra_from": "@this"}`),
+				expectErr:  true,
+				expectSess: &AuthenticationSession{},
 			},
 			{
 				d: "should work with custom header forwarded",
